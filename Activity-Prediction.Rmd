@@ -1,0 +1,188 @@
+---
+title: "Activity Prediction Report"
+author: "Rohit Benny Abraham"
+date: "8/12/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Overview
+Human Activity Recognition - HAR - has emerged as a key research area in the 
+last years and is gaining increasing attention by the pervasive computing 
+research community (see picture below, that illustrates the increasing number 
+of publications in HAR with wearable accelerometers), especially for the 
+development of context-aware systems. There are many potential applications for 
+HAR, like elderly monitoring, lifelog systems for monitoring energy 
+expenditure and for supporting weight-loss programs, and digital assistants for 
+weight lifting exercises.
+
+The goal of your project is to predict the manner in which they did the 
+exercise. This is the "classe" variable in the training set.  
+
+In order to achieve this objective, data cleaning (for NA values) and feature 
+selection was performed prior to applying random forest and generalized 
+boosted regression model (GBM) as our prediction models.
+
+## Loading dependencies and data
+```{r dependencies, results='hide'}
+library(caret)
+library(ggplot2)
+library(randomForest)
+library(gbm)
+library(corrplot)
+```
+
+## Data description
+
+The training dataset consists of 160 different attributes with over 19000 
+observations. Six young healthy participants were asked to perform one set of 10 
+repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions, 
+which is recorded in our target variable (classe). Below is the class 
+description: 
+
+- Exactly according to the specification (Class A)
+- Throwing the elbows to the front (Class B)
+- Lifting the dumbbell only halfway (Class C)
+- Lowering the dumbbell only halfway (Class D)
+- Throwing the hips to the front (Class E)
+
+
+```{r data, echo=FALSE}
+train <- read.csv("pml-training.csv")
+test <- read.csv("pml-testing.csv")
+```
+
+## Data Preprocessing
+
+Verified the count of missing values in both the datasets and observed that all 
+the data points are missing for the columns containing these values. Hence 
+removing the entire column; 67 for training and 100 for test data.
+
+Then removed all the redundant variables by checking for non-zero variance and 
+highly correlated variables (with a cut-off 0.8). After these steps, we are left 
+with 40 variables for predictions.
+
+```{r datatable, echo=FALSE, message=FALSE, warnings=FALSE, results='asis'}
+tabl <- "               Feature selection process
+
+| Process           | Dataset       | Total Features  |
+|-------------------|:-------------:|----------------:|
+| Initial           | train/test    |    160/160      |
+| NA treatment      | train/test    |     86/53       |
+| Non- Zero variance| train/test    |     53/53       |
+| Correlation check | train/test    |     40/40       |
+"
+cat(tabl)
+```
+
+```{r preprocess, echo=FALSE, results = 'hide'}
+# Check if all the values are NA for a column
+colnames(train)[colSums(is.na(train)) > 0]
+table(colSums(is.na(train)) > 0)
+
+# Removing the columns with NA
+train <- train[ , colSums(is.na(train)) == 0]
+test <- test[ , colSums(is.na(test)) == 0]
+
+# Removing first 7 columns as they dont contribute significantly
+train <- train[, -c(1:7)]
+test <- test[, -c(1:7)]
+
+# Preparing dataset for prediction 
+inTrain <- createDataPartition(y = train$classe, p = 0.7, list = FALSE)
+training <- train[inTrain, ]
+testing <- train[-inTrain, ]
+
+# Removing redundant features by checking non-zero variance
+nonZV <- nearZeroVar(training)
+training <- training[, -nonZV]
+testing  <- testing[, -nonZV]
+
+# Calculate correlation matrix
+correlationMatrix <- cor(training[, -53])
+# Find attributes that are highly corrected
+highlyCorrelated <- findCorrelation(correlationMatrix, cutoff=0.8)
+# Print names of highly correlated attributes
+names(training)[highlyCorrelated]
+
+# Removing highly correlated attributes
+trainData <- training[, -highlyCorrelated]
+testData <- testing[, -highlyCorrelated]
+```
+
+## Model Building
+
+Two methods were attempted, Random forest (RF) and Generalized Boosted 
+Regression Model (GBM) out of which the RF model was the better performing model 
+with an accuracy of ~99%. In both the models, cross-validation was passed as a 
+control parameter to generalized the data and to remove the bias, if any.
+
+### 1. Random forest
+
+```{r RF, echo=FALSE}
+modelRF <- train(classe ~ ., method = 'rf', data = trainData, 
+                 trControl = trainControl(method = 'cv', number = 5, 
+                                          verboseIter = FALSE))
+modelRF$finalModel
+
+# Prediction
+predictRF <- predict(modelRF, newdata = testData)
+confusionMatrix(predictRF, as.factor(testData$classe))
+```
+
+The accuracy of the RF model is quite high i.e ~99% with out of sample error 
+being 0.011
+
+### 2. Generalized Boosted Regression Model
+
+```{r GBM, echo = FALSE}
+set.seed(1993)
+modelGBM <- train(classe ~ ., method = 'gbm', data = trainData,
+                  trControl = trainControl(method = 'repeatedcv', number = 5,
+                                           repeats = 1), verbose = FALSE)
+modelGBM$finalModel
+
+# Prediction
+predictGBM <- predict(modelGBM, newdata = testData)
+confusionMatrix(predictGBM, as.factor(testData$classe))
+```
+
+The accuracy of the GBM model is also high i.e ~95% with out of sample error 
+being 0.05
+
+## Results
+
+Here, we apply the best model (RF) because of its high accuracy and low out of 
+sample error rate, to the test set to predict the activity type 
+for each of the 20 observations.
+
+```{r Results, echo = FALSE}
+finalPred <- predict(modelRF, newdata = test)
+finalPred
+```
+
+## Appendix
+
+## Correlation plot 
+
+```{r corplot, echo = FALSE}
+# Plot the correlation matrix
+corrplot(correlationMatrix, method = "color", type = "lower", tl.cex = 0.8, 
+         tl.col = rgb(0, 0, 0))
+```
+
+## Accuracy plot for Random Forest model (with cross validation)
+
+```{r RF Plot, echo = FALSE}
+plot(modelRF)
+```
+
+## Accuracy plot for GBM (with cross validation)
+
+```{r GBM plot, echo = FALSE}
+plot(modelGBM)
+```
+
